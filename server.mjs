@@ -1,0 +1,17 @@
+import express from 'express';
+import { join } from 'node:path';
+import { RevocationAssuranceService } from './domain.mjs';
+import { JsonRevocationStore } from './store.mjs';
+const store = new JsonRevocationStore(process.env.DATA_FILE || join(process.cwd(), 'data', 'revocations.json'));
+const service = new RevocationAssuranceService(store.load(), (state) => store.save(state));
+const app = express(); app.use(express.json());
+const route = (handler) => (request, response) => { try { handler(request, response); } catch (error) { response.status(400).json({ error: error.message }); } };
+app.get('/health', (_request, response) => response.json({ status: 'ok', service: 'supplier-evidence-access-revocation-assurance-platform' }));
+app.get('/orders', (_request, response) => response.json(service.state.orders));
+app.get('/orders/:id/audit', route((request, response) => response.json(service.auditFor(request.params.id))));
+app.post('/orders', route((request, response) => response.status(201).json(service.order(request.body))));
+app.post('/orders/:id/evidence', route((request, response) => response.json(service.capture(request.params.id, request.body.actor, request.body.evidenceReference))));
+app.post('/orders/:id/verify', route((request, response) => response.json(service.verify(request.params.id, request.body.actor, request.body.verdict, request.body.note))));
+app.post('/orders/expire-due', route((request, response) => response.json(service.escalateDue(request.body.actor))));
+app.post('/orders/:id/close', route((request, response) => response.json(service.close(request.params.id, request.body.actor))));
+app.listen(process.env.PORT || 55400, '0.0.0.0');

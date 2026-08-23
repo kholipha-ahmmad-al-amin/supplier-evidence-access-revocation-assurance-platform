@@ -1,0 +1,12 @@
+import { describe, expect, it } from 'vitest';
+import { RevocationAssuranceService } from '../domain.mjs';
+const fixedNow = () => new Date('2026-08-25T10:00:00.000Z');
+const input = () => ({ evidenceId: 'evidence-660', requester: 'owner@buyer.test', verifier: 'security@buyer.test', subject: 'analyst@buyer.test', scope: 'export certificate vault', dueAt: '2026-08-30T10:00:00.000Z' });
+describe('RevocationAssuranceService', () => {
+  it('verifies and closes a documented revocation', () => { const service = new RevocationAssuranceService(undefined, () => {}, fixedNow); const order = service.order(input()); service.capture(order.id, 'owner@buyer.test', 'ticket-771'); service.verify(order.id, 'security@buyer.test', 'confirmed', 'provider export denied'); expect(service.close(order.id, 'owner@buyer.test').status).toBe('closed'); });
+  it('rejects an order due in the past', () => expect(() => new RevocationAssuranceService(undefined, () => {}, fixedNow).order({ ...input(), dueAt: '2026-08-25T09:00:00.000Z' })).toThrow('future'));
+  it('blocks evidence capture by a non-requester', () => { const service = new RevocationAssuranceService(undefined, () => {}, fixedNow); const order = service.order(input()); expect(() => service.capture(order.id, 'other@buyer.test', 'ticket')).toThrow('requester'); });
+  it('blocks verification by a non-verifier', () => { const service = new RevocationAssuranceService(undefined, () => {}, fixedNow); const order = service.order(input()); service.capture(order.id, 'owner@buyer.test', 'ticket'); expect(() => service.verify(order.id, 'other@buyer.test', 'confirmed', 'no')).toThrow('assigned verifier'); });
+  it('escalates an overdue unverified order', () => { let current = new Date('2026-08-25T08:00:00.000Z'); const service = new RevocationAssuranceService(undefined, () => {}, () => current); const order = service.order({ ...input(), dueAt: '2026-08-25T09:00:00.000Z' }); current = new Date('2026-08-25T10:00:00.000Z'); expect(service.escalateDue()).toHaveLength(1); expect(order.escalation.actor).toBe('system'); });
+  it('persists each successful lifecycle mutation', () => { let writes = 0; const service = new RevocationAssuranceService(undefined, () => { writes += 1; }, fixedNow); const order = service.order(input()); service.capture(order.id, 'owner@buyer.test', 'ticket-771'); service.verify(order.id, 'security@buyer.test', 'confirmed', 'provider export denied'); expect(writes).toBe(3); });
+});
